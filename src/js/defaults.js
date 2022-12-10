@@ -29,6 +29,8 @@ const pluginDefaultOptions = {
     frameWidth: 320,
     // Height of the recorded video frames.
     frameHeight: 240,
+    // Frame interval option for RecordRTC
+    frameInterval: 30,
     // Enables console logging for debugging purposes.
     debug: false,
     // Enable Picture-in-Picture support.

@@ -24,7 +24,7 @@ import compareVersion from './utils/compare-version';
 import {detectBrowser} from './utils/detect-browser';
 
 import {getAudioEngine, isAudioPluginActive, getVideoEngine, getConvertEngine} from './engine/engine-loader';
-import {IMAGE_ONLY, AUDIO_ONLY, VIDEO_ONLY, AUDIO_VIDEO, AUDIO_SCREEN, ANIMATION, SCREEN_ONLY, getRecorderMode} from './engine/record-mode';
+import {IMAGE_ONLY, AUDIO_ONLY, VIDEO_ONLY, AUDIO_VIDEO, AUDIO_SCREEN, AUDIO_VIDEO_SCREEN, ANIMATION, SCREEN_ONLY, getRecorderMode} from './engine/record-mode';
 
 const Plugin = videojs.getPlugin('plugin');
 const Player = videojs.getComponent('Player');
@@ -92,6 +92,7 @@ class Record extends Plugin {
                 deviceIcon = 'screen-perm';
                 break;
             case AUDIO_SCREEN:
+            case AUDIO_VIDEO_SCREEN:
                 deviceIcon = 'sv-perm';
                 break;
         }
@@ -174,6 +175,8 @@ class Record extends Plugin {
         let recordOptions = videojs.mergeOptions(pluginDefaultOptions,
             this.player.options_.plugins.record, newOptions);
 
+        console.log(recordOptions);
+
         // record settings
         this.recordImage = recordOptions.image;
         this.recordAudio = recordOptions.audio;
@@ -192,6 +195,8 @@ class Record extends Plugin {
         // video/canvas settings
         this.videoFrameWidth = recordOptions.frameWidth;
         this.videoFrameHeight = recordOptions.frameHeight;
+        this.frameInterval = recordOptions.frameInterval;
+        console.log(this.frameInterval);
         this.videoFrameRate = recordOptions.videoFrameRate;
         this.videoBitRate = recordOptions.videoBitRate;
         this.videoEngine = recordOptions.videoEngine;
@@ -286,6 +291,7 @@ class Record extends Plugin {
             case ANIMATION:
             case SCREEN_ONLY:
             case AUDIO_SCREEN:
+            case AUDIO_VIDEO_SCREEN:
                 // customize controls
                 if (this.player.bigPlayButton !== undefined) {
                     this.player.bigPlayButton.hide();
@@ -419,7 +425,7 @@ class Record extends Plugin {
         // check for support because some browsers still do not support
         // getDisplayMedia or getUserMedia (like Chrome iOS, see:
         // https://bugs.chromium.org/p/chromium/issues/detail?id=752458)
-        if (this.getRecordType() === SCREEN_ONLY || this.getRecordType() === AUDIO_SCREEN) {
+        if (this.getRecordType() === SCREEN_ONLY || this.getRecordType() === AUDIO_SCREEN || this.getRecordType() === AUDIO_VIDEO_SCREEN) {
             if (navigator.mediaDevices === undefined ||
                 navigator.mediaDevices.getDisplayMedia === undefined) {
                 this.player.trigger(Event.ERROR,
@@ -538,6 +544,53 @@ class Record extends Plugin {
                     }).catch((code) => {
                         // here the screen sharing is in progress as successful result of navigator.mediaDevices.getDisplayMedia and
                         // needs to be stopped because microphone permissions are not acquired by navigator.mediaDevices.getUserMedia
+                        if (screenStream.active) {
+                            screenStream.stop();
+                        }
+                        this.onDeviceError(code);
+                    });
+                }).catch(
+                    this.onDeviceError.bind(this)
+                );
+                break;
+
+            case AUDIO_VIDEO_SCREEN: // @todo
+                // setup screen
+                this.mediaType = {
+                    audio: true,
+                    video: true,
+                    screen: true
+                };
+                let screenConstraints = {};
+                if (this.recordScreen === true) {
+                    screenConstraints = {
+                        video: true // needs to be true for it to work in Firefox
+                    };
+                } else if (typeof this.recordScreen === 'object' &&
+                    this.recordScreen.constructor === Object) {
+                    screenConstraints = this.recordScreen;
+                }
+                navigator.mediaDevices.getDisplayMedia(screenConstraints).then(screenStream => {
+                    const {width, height} = screenStream.getVideoTracks()[0].getSettings();
+
+                    screenStream.width = width;
+                    screenStream.height = height;
+                    screenStream.fullcanvas = true;
+
+                    navigator.mediaDevices.getUserMedia({
+                        audio: this.recordAudio,
+                        video: this.recordVideo
+                    }).then((camera) => {
+                        // join camera track with screencast stream (order matters)
+                        camera.width = 320;
+                        camera.height = 240;
+                        camera.top = screenStream.height - camera.height;
+                        camera.left = screenStream.width - camera.width;
+
+                        this.onDeviceReady.bind(this)([screenStream, camera]);
+                    }).catch((code) => {
+                        // here the screen sharing is in progress as successful result of navigator.mediaDevices.getDisplayMedia and
+                        // needs to be stopped because camera permissions are not acquired by navigator.mediaDevices.getUserMedia
                         if (screenStream.active) {
                             screenStream.stop();
                         }
@@ -707,6 +760,7 @@ class Record extends Plugin {
                 width: this.videoFrameWidth,
                 height: this.videoFrameHeight
             };
+            this.engine.frameInterval = this.frameInterval;
 
             // animated GIF settings
             this.engine.quality = this.animationQuality;
@@ -798,7 +852,9 @@ class Record extends Plugin {
                     this.onLeavePiPHandler);
             }
             // load stream
-            this.load(this.stream);
+            if (this.getRecordType() !== AUDIO_VIDEO_SCREEN) {
+                this.load(this.stream);
+            }
 
             // stream loading is async, so we wait until it's ready to play
             // the stream
@@ -870,6 +926,7 @@ class Record extends Plugin {
                 case VIDEO_ONLY:
                 case AUDIO_VIDEO:
                 case AUDIO_SCREEN:
+                case AUDIO_VIDEO_SCREEN:
                 case SCREEN_ONLY:
                     // preview video stream in video element
                     this.startVideoPreview();
@@ -913,6 +970,7 @@ class Record extends Plugin {
                 case VIDEO_ONLY:
                 case AUDIO_VIDEO:
                 case AUDIO_SCREEN:
+                case AUDIO_VIDEO_SCREEN:
                 case ANIMATION:
                 case SCREEN_ONLY:
                     // wait for media stream on video element to actually load
@@ -1103,6 +1161,7 @@ class Record extends Plugin {
             case VIDEO_ONLY:
             case AUDIO_VIDEO:
             case AUDIO_SCREEN:
+            case AUDIO_VIDEO_SCREEN:
             case SCREEN_ONLY:
                 // pausing the player so we can visualize the recorded data
                 // will trigger an async video.js 'pause' event that we
@@ -1124,7 +1183,7 @@ class Record extends Plugin {
                         this.playbackTimeUpdate);
 
                     // unmute local audio during playback
-                    if (this.getRecordType() === AUDIO_VIDEO || this.getRecordType() === AUDIO_SCREEN) {
+                    if (this.getRecordType() === AUDIO_VIDEO || this.getRecordType() === AUDIO_SCREEN || this.getRecordType() === AUDIO_VIDEO_SCREEN) {
                         this.mediaElement.muted = false;
 
                         // show the volume bar when it's unmuted
@@ -1236,6 +1295,7 @@ class Record extends Plugin {
             case VIDEO_ONLY:
             case AUDIO_VIDEO:
             case AUDIO_SCREEN:
+            case AUDIO_VIDEO_SCREEN:
             case ANIMATION:
             case SCREEN_ONLY:
                 if (this.player.controlBar.currentTimeDisplay &&
@@ -1282,6 +1342,7 @@ class Record extends Plugin {
             case VIDEO_ONLY:
             case AUDIO_VIDEO:
             case AUDIO_SCREEN:
+            case AUDIO_VIDEO_SCREEN:
             case ANIMATION:
             case SCREEN_ONLY:
                 // update duration display component
@@ -1302,7 +1363,7 @@ class Record extends Plugin {
      * @param {(string|blob|file)} url - Either the URL of the media file,
      *     a Blob, a File object or MediaStream.
      */
-    load(url) {
+    load(url) { // @todo
         switch (this.getRecordType()) {
             case AUDIO_ONLY:
                 // visualize recorded Blob stream
@@ -1315,6 +1376,22 @@ class Record extends Plugin {
             case AUDIO_SCREEN:
             case ANIMATION:
             case SCREEN_ONLY:
+                if (url instanceof Blob || url instanceof File) {
+                    // make sure to reset it (#312)
+                    this.mediaElement.srcObject = null;
+                    // assign blob using createObjectURL
+                    this.mediaElement.src = URL.createObjectURL(url);
+                } else {
+                    // assign stream with srcObject
+                    setSrcObject(url, this.mediaElement);
+                }
+                break;
+
+            case AUDIO_VIDEO_SCREEN:
+                console.log(url);
+                if (Array.isArray(url)) {
+                    url = url[0];
+                }
                 if (url instanceof Blob || url instanceof File) {
                     // make sure to reset it (#312)
                     this.mediaElement.srcObject = null;
@@ -1539,6 +1616,17 @@ class Record extends Plugin {
      * @param {boolean} mute - Whether or not the mute the track(s).
      */
     muteTracks(mute) {
+        if (this.getRecordType() === AUDIO_VIDEO_SCREEN) {
+            this.stream.forEach(stream => {
+                if (stream.getAudioTracks().length > 0) {
+                    stream.getAudioTracks()[0].enabled = !mute;
+                }
+                if (stream.getVideoTracks().length > 0) {
+                    stream.getVideoTracks()[0].enabled = !mute;
+                }
+            });
+        }
+
         if ((this.getRecordType() === AUDIO_ONLY ||
             this.getRecordType() === AUDIO_SCREEN ||
             this.getRecordType() === AUDIO_VIDEO) &&
@@ -1547,6 +1635,7 @@ class Record extends Plugin {
         }
 
         if (this.getRecordType() !== AUDIO_ONLY &&
+            this.getRecordType() !== AUDIO_VIDEO_SCREEN &&
             this.stream.getVideoTracks().length > 0) {
             this.stream.getVideoTracks()[0].enabled = !mute;
         }

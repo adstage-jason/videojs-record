@@ -12,7 +12,7 @@ player.record().destroy();
 | Method | Description |
 | --- | --- |
 | `isRecording` | Returns a boolean indicating whether recording is active or not. |
-| `getRecordType` | Get recorder type as string. Either `image_only`, `animation`, `audio_only`, `video_only`, `audio_video`, `screen_only` or `audio_screen`. |
+| `getRecordType` | Get recorder type as string. Either `image_only`, `animation`, `audio_only`, `video_only`, `audio_video`, `screen_only`, `audio_screen`, or `audio_video_screen`. |
 | `saveAs` | Show save as dialog in browser so the user can [store the recorded media locally](recorded-data#save-data). |
 | `destroy` | Destroys the recorder instance and children (including the video.js player). |
 | `reset` | Not as destructive as `destroy`: use this if you want to reset the player interface and recorder state. |
